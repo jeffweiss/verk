@@ -48,7 +48,7 @@ defmodule Verk do
   def enqueue(job = %Job{args: args}, _redis) when not is_list(args), do: {:error, {:missing_args, job}}
   def enqueue(job = %Job{jid: nil}, redis), do: enqueue(%Job{job | jid: generate_jid}, redis)
   def enqueue(%Job{jid: jid, queue: queue} = job, redis) do
-    case Redix.command(redis, ["LPUSH", "queue:#{queue}", Poison.encode!(job)]) do
+    case Redix.command(redis, ["LPUSH", queue_name(queue), Poison.encode!(job)]) do
       {:ok, _} -> {:ok, jid}
       {:error, reason} -> {:error, reason}
     end
@@ -89,5 +89,13 @@ defmodule Verk do
   defp generate_jid do
     <<part1::32, part2::32>> = :crypto.rand_bytes(8)
    "#{part1}#{part2}"
+  end
+
+  def queue_name(queue) do
+    Application.get_env(:verk, :namespace, nil)
+    |> case do
+      nil -> "queue:#{queue}"
+      namespace -> "#{namespace}:queue:#{queue}"
+    end
   end
 end

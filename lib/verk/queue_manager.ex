@@ -85,7 +85,7 @@ defmodule Verk.QueueManager do
 
     state = %State{queue_name: queue_name, redis: redis, node_id: node_id}
 
-    Logger.info "Queue Manager started for queue #{queue_name}"
+    Logger.info "Queue Manager started for queue #{Verk.queue_name(state.queue_name)}"
     {:ok, state}
   end
 
@@ -93,18 +93,18 @@ defmodule Verk.QueueManager do
   def handle_call(:enqueue_inprogress, _from, state) do
     in_progress_key = inprogress(state.queue_name, state.node_id)
     case Redix.command(state.redis, ["EVALSHA", @lpop_rpush_src_dest_script_sha, 2,
-                                     in_progress_key, "queue:#{state.queue_name}"]) do
+                                     in_progress_key, Verk.queue_name(state.queue_name)]) do
       {:ok, n} ->
-        Logger.info("#{n} jobs readded to the queue #{state.queue_name} from inprogress list")
+        Logger.info("#{n} jobs readded to the queue #{Verk.queue_name(state.queue_name)} from inprogress list")
         {:reply, :ok, state}
       {:error, reason} ->
-        Logger.error("Failed to add jobs back to queue #{state.queue_name} from inprogress. Error: #{inspect reason}")
+        Logger.error("Failed to add jobs back to queue #{Verk.queue_name(state.queue_name)} from inprogress. Error: #{inspect reason}")
         {:stop, :redis_failed, state}
     end
   end
 
   def handle_call({:dequeue, n}, _from, state) do
-    case Redix.command(state.redis, ["EVALSHA", @mrpop_lpush_src_dest_script_sha, 2,  "queue:#{state.queue_name}",
+    case Redix.command(state.redis, ["EVALSHA", @mrpop_lpush_src_dest_script_sha, 2,  Verk.queue_name(state.queue_name),
                                      inprogress(state.queue_name, state.node_id), min(@max_jobs, n)]) do
       {:ok, []} ->
         {:reply, [], state}
@@ -154,7 +154,11 @@ defmodule Verk.QueueManager do
   end
 
   defp inprogress(queue_name, node_id) do
-    "inprogress:#{queue_name}:#{node_id}"
+    Application.get_env(:verk, :namespace, nil)
+    |> case do
+      nil -> "inprogress:#{queue_name}:#{node_id}"
+      namespace -> "#{namespace}:inprogress:#{queue_name}:#{node_id}"
+    end
   end
 
   defp format_stacktrace(stacktrace) when is_list(stacktrace) do
